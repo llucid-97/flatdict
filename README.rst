@@ -1,10 +1,6 @@
 FlatDict
 ========
 
-|Version| |Status| |Coverage| |License|
-
-========
-
 *This is a fork of Gavin M. Roy 's Flat Dict package : https://github.com/gmr/flatdict
 
 I have modified it to use tuples to represent the key tree instead of delimited strings.
