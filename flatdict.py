@@ -12,20 +12,20 @@ __version__ = '4.0.1'
 
 NO_DEFAULT = object()
 
+# class KeyTree(tuple):
+#     pass
+
+KeyTree = tuple
 
 class FlatDict(MutableMapping):
-    """:class:`~flatdict.FlatDict` is a dictionary object that allows for
-    single level, delimited key/value pair mapping of nested dictionaries.
-    The default delimiter value is ``:`` but can be changed in the constructor
-    or by calling :meth:`FlatDict.set_delimiter`.
-
+    """
+    A fork of FlatDict that uses tuples to represent the tree rather than delimited strings
     """
     _COERCE = dict
 
-    def __init__(self, value=None, delimiter=':', dict_class=dict):
-        super(FlatDict, self).__init__()
+    def __init__(self, value=None, dict_class=dict):
+        super().__init__()
         self._values = dict_class()
-        self._delimiter = delimiter
         self.update(value)
 
     def __contains__(self, key):
@@ -33,12 +33,34 @@ class FlatDict(MutableMapping):
         not delimited key values.
 
         :param mixed key: The key to check for
-
         """
         if self._has_delimiter(key):
-            pk, ck = key.split(self._delimiter, 1)
+            pk, ck = self._split_key(key)
             return pk in self._values and ck in self._values[pk]
         return key in self._values
+
+    @staticmethod
+    def _split_key(key):
+        assert len(key) > 1
+        pk, *ck = key
+        ck = FlatDict._squash_key(ck)
+        return pk, ck
+
+    def _join_keys(self, *args):
+        retval = []
+        for k in args:
+            if self._has_delimiter(k):
+                retval += list(k)
+            else:
+                retval.append(k)
+        return KeyTree(retval)
+
+    @staticmethod
+    def _squash_key(x):
+        assert len(x)
+        if len(x) == 1:
+            return x[0]
+        return KeyTree(x)
 
     def __delitem__(self, key):
         """Delete the item for the specified key, automatically dealing with
@@ -51,7 +73,7 @@ class FlatDict(MutableMapping):
         if key not in self:
             raise KeyError
         if self._has_delimiter(key):
-            pk, ck = key.split(self._delimiter, 1)
+            pk, ck = self._split_key(key)
             del self._values[pk][ck]
             if not self._values[pk]:
                 del self._values[pk]
@@ -93,7 +115,8 @@ class FlatDict(MutableMapping):
 
         """
         values = self._values
-        key = [key] if isinstance(key, int) else key.split(self._delimiter)
+        key = key if self._has_delimiter(key) else [key]
+
         for part in key:
             values = values[part]
         return values
@@ -121,7 +144,7 @@ class FlatDict(MutableMapping):
         :rtype: tuple
 
         """
-        return type(self), (self.as_dict(), self._delimiter)
+        return type(self), (self.as_dict())
 
     def __repr__(self):
         """Return the string representation of the instance.
@@ -129,8 +152,7 @@ class FlatDict(MutableMapping):
         :rtype: str
 
         """
-        return '<{} id={} {}>"'.format(self.__class__.__name__, id(self),
-                                       str(self))
+        return f'<{self.__class__.__name__} id={id(self)} {str(self)}>"'
 
     def __setitem__(self, key, value):
         """Assign the value to the key, dynamically building nested
@@ -141,16 +163,15 @@ class FlatDict(MutableMapping):
         :raises: TypeError
 
         """
-        if isinstance(value, self._COERCE) and not isinstance(value, FlatDict):
-            value = self.__class__(value, self._delimiter)
+        if isinstance(value, self._COERCE) and not isinstance(value, type(self)):
+            value = self.__class__(value)
         if self._has_delimiter(key):
-            pk, ck = key.split(self._delimiter, 1)
+            pk, ck = self._split_key(key)
             if pk not in self._values:
-                self._values[pk] = self.__class__({ck: value}, self._delimiter)
+                self._values[pk] = self.__class__({ck: value})
                 return
-            elif not isinstance(self._values[pk], FlatDict):
-                raise TypeError(
-                    'Assignment to invalid type for key {}'.format(pk))
+            elif not isinstance(self._values[pk], type(self)):
+                raise TypeError(f'Assignment to invalid type for key {pk}')
             self._values[pk][ck] = value
         else:
             self._values[key] = value
@@ -173,12 +194,12 @@ class FlatDict(MutableMapping):
         out = dict({})
         for key in self.keys():
             if self._has_delimiter(key):
-                pk, ck = key.split(self._delimiter, 1)
+                pk, ck = self._split_key(key)
                 if self._has_delimiter(ck):
-                    ck = ck.split(self._delimiter, 1)[0]
-                if isinstance(self._values[pk], FlatDict) and pk not in out:
+                    ck, _ = self._split_key(ck)
+                if isinstance(self._values[pk], type(self)) and pk not in out:
                     out[pk] = {}
-                if isinstance(self._values[pk][ck], FlatDict):
+                if isinstance(self._values[pk][ck], type(self)):
                     out[pk][ck] = self._values[pk][ck].as_dict()
                 else:
                     out[pk][ck] = self._values[pk][ck]
@@ -196,7 +217,7 @@ class FlatDict(MutableMapping):
         :rtype: flatdict.FlatDict
 
         """
-        return self.__class__(self.as_dict(), delimiter=self._delimiter)
+        return self.__class__(self.as_dict())
 
     def get(self, key, d=None):
         """Return the value for key if key is in the flat dictionary, else
@@ -281,14 +302,12 @@ class FlatDict(MutableMapping):
         """
         keys = []
 
-        for key, value in self._values.items():
-            if isinstance(value, (FlatDict, dict)):
-                nested = [
-                    self._delimiter.join([str(key), str(k)])
-                    for k in value.keys()]
-                keys += nested if nested else [key]
+        for pk, value in self._values.items():
+            if isinstance(value, (type(self), dict)):
+                nested = [self._join_keys(pk, ck) for ck in value.keys()]
+                keys += nested if nested else [pk]
             else:
-                keys.append(key)
+                keys.append(pk)
 
         return keys
 
@@ -322,24 +341,6 @@ class FlatDict(MutableMapping):
             self.__setitem__(key, default)
         return self.__getitem__(key)
 
-    def set_delimiter(self, delimiter):
-        """Override the default or passed in delimiter with a new value. If
-        the requested delimiter already exists in a key, a :exc:`ValueError`
-        will be raised.
-
-        :param str delimiter: The delimiter to use
-        :raises: ValueError
-
-        """
-        for key in self.keys():
-            if delimiter in key:
-                raise ValueError('Key {!r} collides with delimiter {!r}', key,
-                                 delimiter)
-        self._delimiter = delimiter
-        for key in self._values.keys():
-            if isinstance(self._values[key], FlatDict):
-                self._values[key].set_delimiter(delimiter)
-
     def update(self, other=None, **kwargs):
         """Update the flat dictionary with the key/value pairs from other,
         overwriting existing keys.
@@ -366,13 +367,11 @@ class FlatDict(MutableMapping):
 
     def _has_delimiter(self, key):
         """Checks to see if the key contains the delimiter.
-
         :rtype: bool
-
         """
-        return isinstance(key, str) and self._delimiter in key
+        return isinstance(key, KeyTree)
 
-
+    
 class FlatterDict(FlatDict):
     """Like :class:`~flatdict.FlatDict` but also coerces lists and sets
      to child-dict instances with the offset as the key. Alternative to
