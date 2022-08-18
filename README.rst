@@ -1,4 +1,4 @@
-FlatDict
+TupleFlatDict
 ========
 
 *This is a fork of Gavin M. Roy 's Flat Dict package : https://github.com/gmr/flatdict
