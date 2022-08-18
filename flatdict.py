@@ -1,12 +1,45 @@
-"""FlatDict is a dict object that allows for single level, delimited
+"""
+This is a fork of FlatDict by Gavin M. Roy.
+The original license is retained here:
+
+Copyright (c) 2013-2020 Gavin M. Roy
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+ * Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+ * Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+ * Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software without
+   specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""
+
+"""
+FlatDict is a dict object that allows for single level, delimited
 key/value pair mapping of nested dictionaries.
 
 """
+import sys
+
 try:
     from collections.abc import MutableMapping
-except ImportError:  # pragma: nocover
+except ImportError:
     from collections import MutableMapping
-import sys
 
 __version__ = '4.0.1'
 
@@ -17,7 +50,8 @@ NO_DEFAULT = object()
 
 KeyTree = tuple
 
-class FlatDict(MutableMapping):
+
+class TupleFlatDict(MutableMapping):
     """
     A fork of FlatDict that uses tuples to represent the tree rather than delimited strings
     """
@@ -26,6 +60,7 @@ class FlatDict(MutableMapping):
     def __init__(self, value=None, dict_class=dict):
         super().__init__()
         self._values = dict_class()
+        self._dict_class = dict_class
         self.update(value)
 
     def __contains__(self, key):
@@ -43,7 +78,7 @@ class FlatDict(MutableMapping):
     def _split_key(key):
         assert len(key) > 1
         pk, *ck = key
-        ck = FlatDict._squash_key(ck)
+        ck = TupleFlatDict._squash_key(ck)
         return pk, ck
 
     def _join_keys(self, *args):
@@ -84,14 +119,14 @@ class FlatDict(MutableMapping):
         """Check for equality against the other value
 
         :param other: The value to compare
-        :type other: FlatDict
+        :type other: TupleFlatDict
         :rtype: bool
         :raises: TypeError
 
         """
         if isinstance(other, dict):
             return self.as_dict() == other
-        elif not isinstance(other, self.__class__):
+        elif not isinstance(other, TupleFlatDict):
             raise TypeError
         return self.as_dict() == other.as_dict()
 
@@ -99,7 +134,7 @@ class FlatDict(MutableMapping):
         """Check for inequality against the other value
 
         :param other: The value to compare
-        :type other: dict or FlatDict
+        :type other: dict or TupleFlatDict
         :rtype: bool
 
         """
@@ -144,7 +179,7 @@ class FlatDict(MutableMapping):
         :rtype: tuple
 
         """
-        return type(self), (self.as_dict())
+        return TupleFlatDict, (self.as_dict())
 
     def __repr__(self):
         """Return the string representation of the instance.
@@ -152,7 +187,7 @@ class FlatDict(MutableMapping):
         :rtype: str
 
         """
-        return f'<{self.__class__.__name__} id={id(self)} {str(self)}>"'
+        return f'<{TupleFlatDict.__name__} id={id(self)} {str(self)}>"'
 
     def __setitem__(self, key, value):
         """Assign the value to the key, dynamically building nested
@@ -163,14 +198,14 @@ class FlatDict(MutableMapping):
         :raises: TypeError
 
         """
-        if isinstance(value, self._COERCE) and not isinstance(value, type(self)):
-            value = self.__class__(value)
+        if isinstance(value, self._COERCE) and not isinstance(value, TupleFlatDict):
+            value = TupleFlatDict(value, dict_class=self._dict_class)
         if self._has_delimiter(key):
             pk, ck = self._split_key(key)
             if pk not in self._values:
-                self._values[pk] = self.__class__({ck: value})
+                self._values[pk] = TupleFlatDict({ck: value}, dict_class=self._dict_class)
                 return
-            elif not isinstance(self._values[pk], type(self)):
+            elif not isinstance(self._values[pk], TupleFlatDict):
                 raise TypeError(f'Assignment to invalid type for key {pk}')
             self._values[pk][ck] = value
         else:
@@ -191,15 +226,15 @@ class FlatDict(MutableMapping):
         :rtype: dict
 
         """
-        out = dict({})
+        out = self._dict_class()
         for key in self.keys():
             if self._has_delimiter(key):
                 pk, ck = self._split_key(key)
+                if pk not in out:
+                    out[pk] = {}
                 if self._has_delimiter(ck):
                     ck, _ = self._split_key(ck)
-                if isinstance(self._values[pk], type(self)) and pk not in out:
-                    out[pk] = {}
-                if isinstance(self._values[pk][ck], type(self)):
+                if isinstance(self._values[pk][ck], TupleFlatDict):
                     out[pk][ck] = self._values[pk][ck].as_dict()
                 else:
                     out[pk][ck] = self._values[pk][ck]
@@ -217,7 +252,7 @@ class FlatDict(MutableMapping):
         :rtype: flatdict.FlatDict
 
         """
-        return self.__class__(self.as_dict())
+        return TupleFlatDict(value=self.as_dict(),dict_class=self._dict_class)
 
     def get(self, key, d=None):
         """Return the value for key if key is in the flat dictionary, else
@@ -303,7 +338,7 @@ class FlatDict(MutableMapping):
         keys = []
 
         for pk, value in self._values.items():
-            if isinstance(value, (type(self), dict)):
+            if isinstance(value, (TupleFlatDict, dict)):
                 nested = [self._join_keys(pk, ck) for ck in value.keys()]
                 keys += nested if nested else [pk]
             else:
@@ -371,118 +406,52 @@ class FlatDict(MutableMapping):
         """
         return isinstance(key, KeyTree)
 
-    
-class FlatterDict(FlatDict):
-    """Like :class:`~flatdict.FlatDict` but also coerces lists and sets
-     to child-dict instances with the offset as the key. Alternative to
-     the implementation added in v1.2 of FlatDict.
-
-    """
-    _COERCE = list, tuple, set, dict, FlatDict
-    _ARRAYS = list, set, tuple
-
-    def __init__(self, value=None, delimiter=':', dict_class=dict):
-        self.original_type = type(value)
-        if self.original_type in self._ARRAYS:
-            value = {str(i): v for i, v in enumerate(value)}
-        super(FlatterDict, self).__init__(value, delimiter, dict_class)
-
-    def __setitem__(self, key, value):
-        """Assign the value to the key, dynamically building nested
-        FlatDict items where appropriate.
-
-        :param mixed key: The key for the item
-        :param mixed value: The value for the item
-        :raises: TypeError
-
+    def get_flat_view(self):
         """
-        if isinstance(value, self._COERCE) and \
-                not isinstance(value, FlatterDict):
-            value = self.__class__(value, self._delimiter)
-        if self._has_delimiter(key):
-            pk, ck = key.split(self._delimiter, 1)
-            if pk not in self._values:
-                self._values[pk] = self.__class__({ck: value}, self._delimiter)
-                return
-            if getattr(self._values[pk], 'original_type',
-                       None) in self._ARRAYS:
-                try:
-                    k, cck = ck.split(self._delimiter, 1)
-                    int(k)
-                except ValueError:
-                    raise TypeError(
-                        'Assignment to invalid type for key {}{}{}'.format(
-                            pk, self._delimiter, ck))
-                self._values[pk][k][cck] = value
-                return
-            elif not isinstance(self._values[pk], FlatterDict):
-                raise TypeError(
-                    'Assignment to invalid type for key {}'.format(pk))
-            self._values[pk][ck] = value
-        else:
-            self._values[key] = value
+        Return a dictionary whose keys and values correspond to the nested keys from the .keys() method,
+        and .values() correspond to the leaves of said keys form the .values() method.
 
-    def as_dict(self):
-        """Return the :class:`~flatdict.FlatterDict` as a nested
-        :class:`dict`.
-
-        :rtype: dict
-
+        This makes it easy to iterate through the whole structure as a flattened dict.
+        :return:
         """
-        out = {}
-        for key in self.keys():
-            if self._has_delimiter(key):
-                pk, ck = key.split(self._delimiter, 1)
-                if self._has_delimiter(ck):
-                    ck = ck.split(self._delimiter, 1)[0]
-                if isinstance(self._values[pk], FlatterDict) and pk not in out:
-                    if self._values[pk].original_type == tuple:
-                        out[pk] = tuple(self._child_as_list(pk))
-                    elif self._values[pk].original_type == list:
-                        out[pk] = self._child_as_list(pk)
-                    elif self._values[pk].original_type == set:
-                        out[pk] = set(self._child_as_list(pk))
-                    elif self._values[pk].original_type == dict:
-                        out[pk] = self._values[pk].as_dict()
-            else:
-                if isinstance(self._values[key], FlatterDict):
-                    out[key] = self._values[key].original_type()
-                else:
-                    out[key] = self._values[key]
-        return out
+        return dict(self)
 
-    def _child_as_list(self, pk, ck=None):
-        """Returns a list of values from the child FlatterDict instance
-        with string based integer keys.
+class TupleFlatDefaultDict(TupleFlatDict):
+    def __init__(self, _default_factory, **values):
+        from collections import defaultdict
+        from functools import partial
+        super().__init__(
+            value=(values if len(values) else None),
+            dict_class=partial(defaultdict, _default_factory)
+        )
 
-        :param str pk: The parent key
-        :param str ck: The child key, optional
-        :rtype: list
 
-        """
-        if ck is None:
-            subset = self._values[pk]
-        else:
-            subset = self._values[pk][ck]
-        # Check if keys has delimiter, which implies deeply nested dict
-        keys = subset.keys()
-        if any(self._has_delimiter(k) for k in keys):
-            out = []
-            split_keys = {k.split(self._delimiter)[0] for k in keys}
-            for k in sorted(split_keys, key=lambda x: int(x)):
-                if subset[k].original_type == tuple:
-                    out.append(tuple(self._child_as_list(pk, k)))
-                elif subset[k].original_type == list:
-                    out.append(self._child_as_list(pk, k))
-                elif subset[k].original_type == set:
-                    out.append(set(self._child_as_list(pk, k)))
-                elif subset[k].original_type == dict:
-                    out.append(subset[k].as_dict())
-            return out
+if __name__ == '__main__':
+    def __san_check():
+        from flatdict import FlatDict
+        a = TupleFlatDict({
+            "a": {
+                "b": {
+                    "c"
+                }
+            }
+        })
+        add = a.as_dict()
+        print(add)
+        a = {"Root": {
+            "A": 1,
+            "B": {
+                "B-1": 2,
+                "B-3": 3
+            },
+            2: None,
+            3.14159: "Aojdsvka"
 
-        # Python prior 3.6 does not guarantee insertion order, remove it after
-        # EOL python 3.5 - 2020-09-13
-        if sys.version_info[0:2] < (3, 6):  # pragma: nocover
-            return [subset[k] for k in sorted(keys, key=lambda x: int(x))]
-        else:
-            return [subset[k] for k in keys]
+        }}
+
+        flat_a = TupleFlatDict(a)
+        print(flat_a)
+        print(flat_a.keys())
+
+
+    __san_check()
